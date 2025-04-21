@@ -1,24 +1,23 @@
 const express = require('express');
 const router = express.Router();
-const upload = require('../middleware/upload'); // path to upload.js
-const db = require('../db/database');
+const upload = require('../middleware/upload');
+const db = require('../db/database'); // Assuming this now returns MySQL connection
 const fs = require('fs');
 const path = require('path');
 
-
 // Get all employees
 router.get('/', (req, res) => {
-  db.all('SELECT * FROM employees', [], (err, rows) => {
+  db.query('SELECT * FROM employees', (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
+    res.json(results);
   });
 });
 
 // Get one employee
 router.get('/:id', (req, res) => {
-  db.get('SELECT * FROM employees WHERE id = ?', [req.params.id], (err, row) => {
+  db.query('SELECT * FROM employees WHERE id = ?', [req.params.id], (err, results) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(row);
+    res.json(results[0]); // MySQL returns array, get first item
   });
 });
 
@@ -34,16 +33,14 @@ router.post('/', upload.single('avatar'), (req, res) => {
     ? [name, department, designation, project, type, status, avatarPath]
     : [name, department, designation, project, type, status];
 
-  db.run(sql, params, function (err) {
+  db.query(sql, params, (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ id: this.lastID, avatar: avatarPath || null });
+    res.json({ id: result.insertId, avatar: avatarPath || null });
   });
 });
 
-
 // Update employee (with optional avatar upload)
 router.put('/:id', upload.single('avatar'), (req, res) => {
-  
   const { name, department, designation, project, type, status } = req.body;
   const newAvatarPath = req.file ? `/uploads/avatars/${req.file.filename}` : null;
 
@@ -56,38 +53,37 @@ router.put('/:id', upload.single('avatar'), (req, res) => {
       ? [name, department, designation, project, type, status, avatarPathToUse, req.params.id]
       : [name, department, designation, project, type, status, req.params.id];
 
-    db.run(sql, params, function (err) {
+    db.query(sql, params, (err, result) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ updated: this.changes, avatar: avatarPathToUse || undefined });
+      res.json({ updated: result.affectedRows, avatar: avatarPathToUse || undefined });
     });
   };
 
   if (newAvatarPath) {
     // Get current avatar from DB first
-    db.get('SELECT avatar FROM employees WHERE id = ?', [req.params.id], (err, row) => {
+    db.query('SELECT avatar FROM employees WHERE id = ?', [req.params.id], (err, results) => {
       if (err) return res.status(500).json({ error: err.message });
 
-      if (row?.avatar) {
-        const oldAvatarFullPath = path.join(process.cwd(), './', row.avatar);
+      if (results[0]?.avatar) {
+        const oldAvatarFullPath = path.join(process.cwd(), './', results[0].avatar);
         fs.unlink(oldAvatarFullPath, (unlinkErr) => {
           if (unlinkErr) console.warn('Failed to delete old avatar:', unlinkErr.message);
-          updateEmployee(newAvatarPath); // Proceed after deletion attempt
+          updateEmployee(newAvatarPath);
         });
       } else {
-        updateEmployee(newAvatarPath); // No old avatar
+        updateEmployee(newAvatarPath);
       }
     });
   } else {
-    updateEmployee(null); // No new avatar uploaded
+    updateEmployee(null);
   }
 });
 
-
 // Delete employee
 router.delete('/:id', (req, res) => {
-  db.run('DELETE FROM employees WHERE id = ?', [req.params.id], function(err) {
+  db.query('DELETE FROM employees WHERE id = ?', [req.params.id], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ deleted: this.changes });
+    res.json({ deleted: result.affectedRows });
   });
 });
 
